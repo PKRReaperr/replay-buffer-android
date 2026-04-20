@@ -1,6 +1,7 @@
 package com.pkrreaperr.replaybufferandroid
 
 import android.Manifest
+import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -104,6 +105,11 @@ private fun ReplayBufferScreen(viewModel: ReplayBufferViewModel) {
         label = "overlayAlpha"
     )
     val previewTapSource = remember { MutableInteractionSource() }
+    val missingPermissionMessage = if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) {
+        "Camera, microphone, and storage permissions are required."
+    } else {
+        "Camera and microphone permissions are required."
+    }
 
     fun noteInteraction() {
         controlsVisible = true
@@ -117,12 +123,15 @@ private fun ReplayBufferScreen(viewModel: ReplayBufferViewModel) {
     }
 
     LaunchedEffect(Unit) {
-        permissionLauncher.launch(
-            arrayOf(
-                Manifest.permission.CAMERA,
-                Manifest.permission.RECORD_AUDIO
-            )
-        )
+        val permissions = buildList {
+            add(Manifest.permission.CAMERA)
+            add(Manifest.permission.RECORD_AUDIO)
+            if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) {
+                add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+            }
+        }
+
+        permissionLauncher.launch(permissions.toTypedArray())
     }
 
     LaunchedEffect(state.toastMessage) {
@@ -164,7 +173,7 @@ private fun ReplayBufferScreen(viewModel: ReplayBufferViewModel) {
                 contentAlignment = Alignment.Center
             ) {
                 Text(
-                    text = "Camera and microphone permissions are required.",
+                    text = missingPermissionMessage,
                     color = Color.White,
                     style = MaterialTheme.typography.titleMedium
                 )
@@ -252,15 +261,10 @@ private fun ReplayBufferScreen(viewModel: ReplayBufferViewModel) {
                 )
             }
 
-            CenterOverlay(
-                state = state,
-                alpha = maxOf(0.82f, overlayAlpha),
-                modifier = Modifier.align(Alignment.Center)
-            )
-
             BottomOverlay(
                 state = state,
                 alpha = overlayAlpha,
+                submenuOpen = activePanel != null,
                 onSaveReplay = {
                     noteInteraction()
                     viewModel.saveReplay()
@@ -460,45 +464,10 @@ private fun FloatingPanel(
 }
 
 @Composable
-private fun CenterOverlay(
-    state: ReplayBufferUiState,
-    alpha: Float,
-    modifier: Modifier = Modifier
-) {
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-        modifier = modifier.graphicsLayer(alpha = alpha)
-    ) {
-        if (state.isRecording) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier
-                    .clip(RoundedCornerShape(999.dp))
-                    .background(Color.Black.copy(alpha = 0.35f))
-                    .padding(horizontal = 12.dp, vertical = 8.dp)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(10.dp)
-                        .clip(CircleShape)
-                        .background(Color(0xFFFF4D4D))
-                )
-                Text(
-                    text = "Recording ${state.currentSegmentLabel}",
-                    color = Color.White,
-                    style = MaterialTheme.typography.labelLarge
-                )
-            }
-        }
-    }
-}
-
-@Composable
 private fun BottomOverlay(
     state: ReplayBufferUiState,
     alpha: Float,
+    submenuOpen: Boolean,
     onSaveReplay: () -> Unit,
     onToggleRecording: () -> Unit,
     onAdjustTap: () -> Unit,
@@ -519,7 +488,7 @@ private fun BottomOverlay(
     ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(if (submenuOpen) 6.dp else 8.dp),
             modifier = Modifier.fillMaxWidth()
         ) {
             Text(
@@ -535,32 +504,47 @@ private fun BottomOverlay(
                 style = MaterialTheme.typography.bodySmall,
                 textAlign = TextAlign.Center
             )
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth(0.74f)
-                    .clip(RoundedCornerShape(999.dp))
-                    .background(Color.Black.copy(alpha = 0.22f))
-                    .padding(horizontal = 14.dp, vertical = 10.dp)
-            ) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                    modifier = Modifier.fillMaxWidth()
+            if (submenuOpen) {
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(Color.Black.copy(alpha = 0.18f))
+                        .padding(horizontal = 12.dp, vertical = 6.dp)
                 ) {
-                    LinearProgressIndicator(
-                        progress = { state.targetBufferedProgress },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(6.dp)
-                            .clip(RoundedCornerShape(999.dp)),
-                        color = if (state.isRecording) Color(0xFFFF4D4D) else Color.White,
-                        trackColor = Color.White.copy(alpha = 0.16f)
-                    )
                     Text(
                         text = state.targetBufferedLabel,
-                        color = Color.White.copy(alpha = 0.92f),
-                        style = MaterialTheme.typography.bodySmall
+                        color = Color.White.copy(alpha = 0.82f),
+                        style = MaterialTheme.typography.labelSmall
                     )
+                }
+            } else {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(0.74f)
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(Color.Black.copy(alpha = 0.22f))
+                        .padding(horizontal = 14.dp, vertical = 10.dp)
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        LinearProgressIndicator(
+                            progress = { state.targetBufferedProgress },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(6.dp)
+                                .clip(RoundedCornerShape(999.dp)),
+                            color = if (state.isRecording) Color(0xFFFF4D4D) else Color.White,
+                            trackColor = Color.White.copy(alpha = 0.16f)
+                        )
+                        Text(
+                            text = state.targetBufferedLabel,
+                            color = Color.White.copy(alpha = 0.92f),
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
                 }
             }
         }

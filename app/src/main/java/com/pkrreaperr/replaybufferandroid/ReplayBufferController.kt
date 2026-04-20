@@ -5,7 +5,9 @@ import android.content.ContentValues
 import android.content.Context
 import android.hardware.camera2.CaptureRequest
 import android.media.MediaMetadataRetriever
+import android.media.MediaScannerConnection
 import android.os.Build
+import android.os.Environment
 import android.provider.MediaStore
 import androidx.camera.camera2.interop.Camera2CameraControl
 import androidx.camera.camera2.interop.CaptureRequestOptions
@@ -397,19 +399,23 @@ class ReplayBufferController(
     }
 
     private fun saveToMediaStore(file: File) {
+        if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) {
+            saveToLegacyGallery(file)
+            return
+        }
+
         val resolver = context.contentResolver
         val timestamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
 
         val contentValues = ContentValues().apply {
             put(MediaStore.Video.Media.DISPLAY_NAME, "replay-$timestamp.mp4")
             put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/ReplayBuffer")
-                put(MediaStore.Video.Media.IS_PENDING, 1)
-            }
+            put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/ReplayBuffer")
+            put(MediaStore.Video.Media.IS_PENDING, 1)
         }
 
-        val uri = resolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, contentValues)
+        val collection = MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+        val uri = resolver.insert(collection, contentValues)
             ?: throw IllegalStateException("Unable to create output file in MediaStore.")
 
         try {
@@ -419,20 +425,42 @@ class ReplayBufferController(
                 }
             } ?: throw IllegalStateException("Unable to open MediaStore output stream.")
 
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                resolver.update(
-                    uri,
-                    ContentValues().apply {
-                        put(MediaStore.Video.Media.IS_PENDING, 0)
-                    },
-                    null,
-                    null
-                )
-            }
+            resolver.update(
+                uri,
+                ContentValues().apply {
+                    put(MediaStore.Video.Media.IS_PENDING, 0)
+                },
+                null,
+                null
+            )
         } catch (error: Exception) {
             resolver.delete(uri, null, null)
             throw error
         }
+    }
+
+    private fun saveToLegacyGallery(file: File) {
+        val timestamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
+        val moviesDirectory = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES)
+        val replayDirectory = File(moviesDirectory, "ReplayBuffer")
+
+        if (!replayDirectory.exists() && !replayDirectory.mkdirs()) {
+            throw IllegalStateException("Unable to create Movies/ReplayBuffer.")
+        }
+
+        val outputFile = File(replayDirectory, "replay-$timestamp.mp4")
+        FileInputStream(file).use { input ->
+            outputFile.outputStream().use { output ->
+                input.copyTo(output)
+            }
+        }
+
+        MediaScannerConnection.scanFile(
+            context,
+            arrayOf(outputFile.absolutePath),
+            arrayOf("video/mp4"),
+            null
+        )
     }
 
     private fun extractDurationMs(file: File): Long {
